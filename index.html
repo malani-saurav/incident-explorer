@@ -132,7 +132,12 @@
   .filters-bar select:focus, .filters-bar input:focus {
     border-color: var(--accent);
   }
-  .filters-bar input { flex: 1; min-width: 200px; }
+  .filters-bar input[type="text"] { flex: 1; min-width: 200px; }
+  .date-range { display: flex; align-items: center; gap: 6px; }
+  .date-range label { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  .date-range input[type="date"] { min-width: 130px; flex: none; }
+  .date-range .date-clear { background: none; border: 1px solid #333355; color: var(--text-muted); border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .date-range .date-clear:hover { border-color: var(--accent); color: var(--text); }
   .filter-count { color: var(--text-muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
 
   /* Table */
@@ -417,6 +422,48 @@
 </style>
 </head>
 <body>
+
+<!-- Email gate -->
+<div id="email-gate" style="display:none; position:fixed; inset:0; z-index:10000; background:var(--bg); display:flex; align-items:center; justify-content:center;">
+  <div style="background:var(--surface); padding:36px 40px; border-radius:16px; max-width:400px; width:90%; text-align:center;">
+    <h2 style="margin-bottom:8px; font-size:22px;">Incident Explorer</h2>
+    <p style="color:var(--text-muted); font-size:14px; margin-bottom:24px;">Enter your work email to continue</p>
+    <input id="gate-email" type="email" placeholder="you@momentum.io" style="width:100%; padding:10px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.06); color:var(--text); font-size:15px; outline:none;">
+    <div id="gate-error" style="color:var(--p0); font-size:13px; margin-top:8px; min-height:20px;"></div>
+    <button id="gate-submit" style="margin-top:12px; padding:10px 32px; border-radius:8px; border:none; background:var(--accent); color:white; font-size:15px; cursor:pointer; font-weight:600;">Continue</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  const GATE_KEY = 'incident_explorer_email';
+  const stored = localStorage.getItem(GATE_KEY);
+  const gate = document.getElementById('email-gate');
+
+  if (stored && stored.endsWith('@momentum.io')) {
+    gate.style.display = 'none';
+  } else {
+    gate.style.display = 'flex';
+    const input = document.getElementById('gate-email');
+    const err = document.getElementById('gate-error');
+    const submit = document.getElementById('gate-submit');
+
+    function trySubmit() {
+      const email = input.value.trim().toLowerCase();
+      if (!email.endsWith('@momentum.io')) {
+        err.textContent = 'Please use your @momentum.io email';
+        return;
+      }
+      localStorage.setItem(GATE_KEY, email);
+      gate.style.display = 'none';
+    }
+
+    submit.addEventListener('click', trySubmit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') trySubmit(); });
+    input.focus();
+  }
+})();
+</script>
 
 <div class="header">
   <h1>Incident Explorer</h1>
@@ -732,7 +779,17 @@ function buildFilters() {
     html += '</select>';
     return html;
   };
+  // Compute date bounds for placeholders
+  const dates = allData.map(d => d.date).filter(d => d && d !== 'UNKNOWN').sort();
+  const minDate = dates[0] || '';
+  const maxDate = dates[dates.length - 1] || '';
+
   container.innerHTML =
+    '<div class="date-range">' +
+      '<label>From</label><input id="filter-date-from" type="date" min="' + minDate + '" max="' + maxDate + '">' +
+      '<label>To</label><input id="filter-date-to" type="date" min="' + minDate + '" max="' + maxDate + '">' +
+      '<button class="date-clear" id="date-clear-btn" title="Clear date range">Clear</button>' +
+    '</div>' +
     makeSelect('severity', 'All Severities', SEVERITY_ORDER) +
     makeSelect('origin', 'All Origins', getUnique('origin')) +
     makeSelect('detection', 'All Detection', getUnique('detection')) +
@@ -742,6 +799,13 @@ function buildFilters() {
   container.querySelectorAll('select, input').forEach(el => {
     el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', applyFilters);
   });
+  document.getElementById('filter-date-from').addEventListener('change', applyFilters);
+  document.getElementById('filter-date-to').addEventListener('change', applyFilters);
+  document.getElementById('date-clear-btn').addEventListener('click', () => {
+    document.getElementById('filter-date-from').value = '';
+    document.getElementById('filter-date-to').value = '';
+    applyFilters();
+  });
 }
 
 function applyFilters() {
@@ -750,6 +814,8 @@ function applyFilters() {
   const detection = document.getElementById('filter-detection').value;
   const catchable = document.getElementById('filter-catchable').value;
   const search = document.getElementById('filter-search').value.toLowerCase();
+  const dateFrom = document.getElementById('filter-date-from').value;
+  const dateTo = document.getElementById('filter-date-to').value;
 
   filteredData = allData.filter(d => {
     if (sev && d.severity !== sev) return false;
@@ -759,6 +825,11 @@ function applyFilters() {
     if (search) {
       const haystack = `${d.channel} ${d.what_broke} ${d.root_cause}`.toLowerCase();
       if (!haystack.includes(search)) return false;
+    }
+    if (dateFrom || dateTo) {
+      if (!d.date || d.date === 'UNKNOWN') return false;
+      if (dateFrom && d.date < dateFrom) return false;
+      if (dateTo && d.date > dateTo) return false;
     }
     if (activeQuarterFilter && d.date && d.date !== 'UNKNOWN') {
       if (d.date < activeQuarterFilter.start || d.date > activeQuarterFilter.end) return false;
