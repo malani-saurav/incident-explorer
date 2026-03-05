@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Incident Explorer</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #1a1a2e;
+    --surface: #222244;
+    --surface-hover: #2a2a50;
+    --text: #e0e0e0;
+    --text-muted: #8888aa;
+    --accent: #6c63ff;
+    --p0: #e74c3c;
+    --p1: #e67e22;
+    --p2: #f1c40f;
+    --p3: #2ecc71;
+    --origin-self: #e74c3c;
+    --origin-ext: #3498db;
+    --origin-infra: #9b59b6;
+    --origin-config: #f39c12;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header { margin-bottom: 24px; }
+  .header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  .header .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+
+  /* Stats row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .stat-card .stat-value { font-size: 32px; font-weight: 700; }
+  .stat-card .stat-label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+  .stat-card.clickable { cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; }
+  .stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+
+  /* Tooltips */
+  [data-tip] {
+    position: relative;
+    cursor: help;
+    border-bottom: 1px dotted rgba(255,255,255,0.2);
+  }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #111122;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    padding: 10px 14px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    white-space: normal;
+    width: 280px;
+    text-align: left;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 100;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  [data-tip]:hover::after { opacity: 1; }
+  /* Position tooltip below for table header cells to avoid clipping */
+  thead [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
+
+  /* Charts grid */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .chart-card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .chart-card h3 { font-size: 14px; color: var(--text-muted); margin-bottom: 12px; font-weight: 500; }
+  .chart-card canvas { width: 100% !important; }
+
+  /* Filters */
+  .filters-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .filters-bar select, .filters-bar input {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid #333355;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+    min-width: 150px;
+  }
+  .filters-bar select:focus, .filters-bar input:focus {
+    border-color: var(--accent);
+  }
+  .filters-bar input { flex: 1; min-width: 200px; }
+  .filter-count { color: var(--text-muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
+
+  /* Table */
+  .table-wrap {
+    background: var(--surface);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: rgba(0,0,0,0.2);
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--text); }
+  thead th .sort-arrow { margin-left: 4px; font-size: 10px; }
+  tbody tr { cursor: pointer; transition: background 0.15s; }
+  tbody tr:hover { background: var(--surface-hover); }
+  tbody tr.expanded { background: rgba(108,99,255,0.08); }
+  tbody td { padding: 10px 16px; font-size: 13px; border-top: 1px solid rgba(255,255,255,0.04); }
+
+  /* Severity badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .badge-P0 { background: rgba(231,76,60,0.2); color: var(--p0); }
+  .badge-P1 { background: rgba(230,126,34,0.2); color: var(--p1); }
+  .badge-P2 { background: rgba(241,196,15,0.2); color: var(--p2); }
+  .badge-P3 { background: rgba(46,204,113,0.2); color: var(--p3); }
+
+  /* Origin badges */
+  .origin-badge { font-size: 12px; }
+  .origin-self-inflicted { color: var(--origin-self); }
+  .origin-external-dep { color: var(--origin-ext); }
+  .origin-infrastructure { color: var(--origin-infra); }
+  .origin-config-change { color: var(--origin-config); }
+
+  /* Detail row */
+  .detail-row td { padding: 0 !important; border-top: none !important; }
+  .detail-content {
+    padding: 16px 32px 20px;
+    background: rgba(0,0,0,0.15);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .detail-content .detail-field { margin-bottom: 10px; }
+  .detail-content .detail-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 2px; }
+  .detail-content a { color: var(--accent); text-decoration: none; }
+  .detail-content a:hover { text-decoration: underline; }
+
+  .error-msg {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--p0);
+    font-size: 16px;
+  }
+
+  /* Chat panel */
+  .chat-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 24px;
+    box-shadow: 0 4px 16px rgba(108,99,255,0.4);
+    z-index: 1000;
+    transition: transform 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .chat-fab:hover { transform: scale(1.1); }
+
+  .chat-panel {
+    position: fixed;
+    bottom: 96px;
+    right: 24px;
+    width: 440px;
+    max-height: 560px;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .chat-panel.open { display: flex; }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .chat-header h3 { font-size: 14px; font-weight: 600; }
+  .chat-header-actions { display: flex; gap: 8px; }
+  .chat-header-actions button {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border-radius: 4px;
+  }
+  .chat-header-actions button:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 200px;
+    max-height: 360px;
+  }
+
+  .chat-msg {
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 10px 14px;
+    border-radius: 12px;
+    max-width: 90%;
+    word-wrap: break-word;
+  }
+  .chat-msg.user {
+    background: var(--accent);
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+  .chat-msg.assistant {
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+  }
+  .chat-msg.system {
+    background: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+    align-self: center;
+    padding: 4px;
+  }
+  .chat-msg pre {
+    background: rgba(0,0,0,0.3);
+    padding: 8px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 6px 0;
+    font-size: 12px;
+  }
+
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .chat-input-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid #333355;
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+  }
+  .chat-input-row input:focus { border-color: var(--accent); }
+  .chat-input-row button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .chat-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Key modal */
+  .key-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .key-modal-overlay.open { display: flex; }
+  .key-modal {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    width: 400px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .key-modal h3 { font-size: 16px; margin-bottom: 8px; }
+  .key-modal p { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.6; }
+  .key-modal input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid #333355;
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    margin-bottom: 12px;
+  }
+  .key-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .key-modal-actions button {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .key-modal-actions .btn-primary { background: var(--accent); color: white; }
+  .key-modal-actions .btn-danger { background: var(--p0); color: white; }
+  .key-modal-actions .btn-cancel { background: rgba(255,255,255,0.1); color: var(--text); }
+  .key-status { font-size: 11px; color: var(--text-muted); margin-bottom: 12px; }
+  .key-status.has-key { color: var(--p3); }
+
+  @media (max-width: 900px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .charts-grid { grid-template-columns: 1fr; }
+    .filters-bar { flex-direction: column; }
+    .filter-count { margin-left: 0; }
+    .chat-panel { width: calc(100vw - 48px); right: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Incident Explorer</h1>
+  <div class="subtitle">132 incidents | Dec 2021 &ndash; Mar 2026</div>
+</div>
+
+<div id="stats-row" class="stats-row"></div>
+<div id="charts" class="charts-grid">
+  <div class="chart-card"><h3 data-tip="What caused each incident: our own code, vendor failure, infra issue, or config change">Origin Distribution</h3><canvas id="chart-origin"></canvas></div>
+  <div class="chart-card"><h3 data-tip="P0 = widespread critical, P1 = significant, P2 = limited, P3 = minor">Severity Distribution</h3><canvas id="chart-severity"></canvas></div>
+  <div class="chart-card"><h3 data-tip="What quality gate could have prevented each incident from reaching production">Catchable By</h3><canvas id="chart-catchable"></canvas></div>
+  <div class="chart-card"><h3 data-tip="Number of incidents per quarter, colored by severity. Click a bar to filter.">Incidents per Quarter</h3><canvas id="chart-timeline"></canvas></div>
+</div>
+<div id="filters" class="filters-bar"></div>
+<div id="filter-count-display" style="color: var(--text-muted); font-size: 13px; margin-bottom: 8px;"></div>
+<div class="table-wrap">
+  <table>
+    <thead id="table-head"></thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<div id="error" class="error-msg" style="display:none;"></div>
+
+<script>
+const SEVERITY_COLORS = { P0: '#e74c3c', P1: '#e67e22', P2: '#f1c40f', P3: '#2ecc71' };
+const ORIGIN_COLORS = { 'self-inflicted': '#e74c3c', 'external-dep': '#3498db', 'infrastructure': '#9b59b6', 'config-change': '#f39c12' };
+const SEVERITY_ORDER = ['P0', 'P1', 'P2', 'P3'];
+
+/* ---- Glossary / Tooltips ---- */
+const GLOSSARY = {
+  // Severities
+  'P0': 'Widespread critical — core functionality broken for many/all customers, immediate response required',
+  'P1': 'Significant — major feature impacted for multiple customers, urgent fix needed',
+  'P2': 'Limited — feature degraded for a subset of customers, fix within normal cycle',
+  'P3': 'Minor — small issue with minimal customer impact, low priority',
+  // Origins
+  'self-inflicted': 'Caused by our own code change, deployment, or configuration — preventable through better testing/process',
+  'external-dep': 'Caused by a third-party vendor or service we depend on (Pinecone, Recall, Gladia, Zoom, etc.)',
+  'infrastructure': 'Caused by underlying infra (GCP, AWS, database, Kubernetes) rather than application code',
+  'config-change': 'Caused by an intentional configuration or permission change that had unintended consequences (env vars, feature flags, infra settings)',
+  // Detection — how we found out
+  'detection:monitoring': 'Caught by automated alerts, Datadog monitors, or log-based detection before customer reports',
+  'detection:customer-report': 'First discovered when a customer reported the issue — we had no automated detection',
+  'detection:internal-discovery': 'Found by an engineer or team member during routine work, not via automated monitoring',
+  'detection:deploy-check': 'Caught by a post-deploy validation or smoke test (currently 0% — this gate does not exist)',
+  // Catchable by — what could have prevented it
+  'catchable_by:integration-test': 'Could have been caught by testing multiple components together (API + DB, service + service)',
+  'catchable_by:unit-test': 'Could have been caught by testing the individual function/method in isolation',
+  'catchable_by:e2e-test': 'Could have been caught by a full end-to-end test simulating real user flows',
+  'catchable_by:smoke-test': 'Could have been caught by a quick post-deploy check verifying basic functionality works',
+  'catchable_by:contract-test': 'Could have been caught by validating API contracts between services (e.g., Pact tests)',
+  'catchable_by:migration-test': 'Could have been caught by testing database migrations against realistic data',
+  'catchable_by:monitoring': 'Not preventable by pre-deploy tests — only detectable at runtime via monitoring, alerting, or observability',
+  'catchable_by:canary-deploy': 'Could have been caught by gradually rolling out to a subset of traffic before full deploy',
+  'catchable_by:none(external)': 'Not preventable by us — caused by external vendor/service failure outside our control',
+  // Stats
+  'Self-Inflicted': 'Percentage of incidents caused by our own code, config, or process',
+  'Catchable by Integration Test': 'Percentage of incidents that integration tests would have prevented — our biggest testing gap',
+  'Detected by Customers': 'Percentage of incidents where a customer reported the issue before we detected it',
+};
+
+// Context-aware glossary lookup: tries "field:value" first, falls back to plain "value"
+function glossaryTip(value, field) {
+  return GLOSSARY[field + ':' + value] || GLOSSARY[value] || '';
+}
+
+let allData = [];
+let filteredData = [];
+let sortCol = 'date';
+let sortDir = -1; // -1 = desc
+let charts = {};
+
+async function init() {
+  try {
+    const resp = await fetch('incidents.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    allData = await resp.json();
+  } catch (e) {
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = `Failed to load incidents.json: ${e.message}. Make sure the file is served from the same directory.`;
+    return;
+  }
+
+  buildFilters();
+  buildTableHead();
+  applyFilters();
+}
+
+/* ---- Stats ---- */
+function renderStats(data) {
+  const total = data.length;
+  const pct = (arr) => total === 0 ? '0' : Math.round((arr.length / total) * 100);
+  const selfInflicted = data.filter(d => d.origin === 'self-inflicted');
+  const catchableIT = data.filter(d => d.catchable_by === 'integration-test');
+  const customerDetected = data.filter(d => d.detection === 'customer-report');
+
+  const stats = [
+    { value: total, label: 'Total Incidents', action: null },
+    { value: pct(selfInflicted) + '%', label: 'Self-Inflicted', action: () => chartFilter('filter-origin', 'self-inflicted') },
+    { value: pct(catchableIT) + '%', label: 'Catchable by Integration Test', action: () => chartFilter('filter-catchable', 'integration-test') },
+    { value: pct(customerDetected) + '%', label: 'Detected by Customers', action: () => chartFilter('filter-detection', 'customer-report') },
+  ];
+  const row = document.getElementById('stats-row');
+  row.innerHTML = stats.map((s, i) => {
+    const tip = GLOSSARY[s.label] ? ` data-tip="${GLOSSARY[s.label]}"` : '';
+    return `<div class="stat-card${s.action ? ' clickable' : ''}" data-stat-idx="${i}"><div class="stat-value">${s.value}</div><div class="stat-label"${tip}>${s.label}</div></div>`;
+  }).join('');
+  stats.forEach((s, i) => {
+    if (s.action) {
+      row.querySelector(`[data-stat-idx="${i}"]`).addEventListener('click', s.action);
+    }
+  });
+}
+
+/* ---- Charts ---- */
+function destroyCharts() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+}
+
+function dimColor(hex, active) {
+  if (active) return hex;
+  // Convert hex to rgba with low opacity
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},0.2)`;
+}
+
+function getActiveFilter(id) {
+  const el = document.getElementById(id);
+  return el ? el.value : '';
+}
+
+function renderCharts(data) {
+  destroyCharts();
+  Chart.defaults.color = '#8888aa';
+  Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, sans-serif';
+
+  const activeOrigin = getActiveFilter('filter-origin');
+  const activeSeverity = getActiveFilter('filter-severity');
+  const activeCatchable = getActiveFilter('filter-catchable');
+
+  // Origin donut
+  const originCounts = {};
+  data.forEach(d => { originCounts[d.origin] = (originCounts[d.origin] || 0) + 1; });
+  const originLabels = Object.keys(ORIGIN_COLORS);
+  charts.origin = new Chart(document.getElementById('chart-origin'), {
+    type: 'doughnut',
+    data: {
+      labels: originLabels,
+      datasets: [{ data: originLabels.map(l => originCounts[l] || 0), backgroundColor: originLabels.map(l => dimColor(ORIGIN_COLORS[l], !activeOrigin || activeOrigin === l)), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, padding: 12 } } },
+      cutout: '60%',
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const label = originLabels[elements[0].index];
+        chartFilter('filter-origin', label);
+      }
+    }
+  });
+
+  // Severity bar
+  const sevCounts = {};
+  data.forEach(d => { sevCounts[d.severity] = (sevCounts[d.severity] || 0) + 1; });
+  charts.severity = new Chart(document.getElementById('chart-severity'), {
+    type: 'bar',
+    data: {
+      labels: SEVERITY_ORDER,
+      datasets: [{ data: SEVERITY_ORDER.map(s => sevCounts[s] || 0), backgroundColor: SEVERITY_ORDER.map(s => dimColor(SEVERITY_COLORS[s], !activeSeverity || activeSeverity === s)), borderRadius: 4, barPercentage: 0.6 }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } },
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const label = SEVERITY_ORDER[elements[0].index];
+        chartFilter('filter-severity', label);
+      }
+    }
+  });
+
+  // Catchable by horizontal bar
+  const catchCounts = {};
+  data.forEach(d => { catchCounts[d.catchable_by] = (catchCounts[d.catchable_by] || 0) + 1; });
+  const catchLabels = Object.keys(catchCounts).sort((a, b) => catchCounts[b] - catchCounts[a]);
+  charts.catchable = new Chart(document.getElementById('chart-catchable'), {
+    type: 'bar',
+    data: {
+      labels: catchLabels,
+      datasets: [{ data: catchLabels.map(l => catchCounts[l]), backgroundColor: catchLabels.map(l => dimColor('#6c63ff', !activeCatchable || activeCatchable === l)), borderRadius: 4, barPercentage: 0.6 }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } }, y: { grid: { display: false } } },
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const label = catchLabels[elements[0].index];
+        chartFilter('filter-catchable', label);
+      }
+    }
+  });
+
+  // Timeline - incidents per quarter stacked by severity
+  const quarters = {};
+  const quarterDateRanges = {};
+  data.forEach(d => {
+    let q = 'Unknown';
+    if (d.date && d.date !== 'UNKNOWN') {
+      const dt = new Date(d.date);
+      if (!isNaN(dt)) {
+        const yr = dt.getFullYear();
+        const qn = Math.ceil((dt.getMonth() + 1) / 3);
+        q = `${yr} Q${qn}`;
+        if (!quarterDateRanges[q]) {
+          const qStart = new Date(yr, (qn - 1) * 3, 1);
+          const qEnd = new Date(yr, qn * 3, 0);
+          quarterDateRanges[q] = { start: qStart.toISOString().slice(0, 10), end: qEnd.toISOString().slice(0, 10) };
+        }
+      }
+    }
+    if (!quarters[q]) quarters[q] = { P0: 0, P1: 0, P2: 0, P3: 0 };
+    quarters[q][d.severity]++;
+  });
+  const qLabels = Object.keys(quarters).sort((a, b) => {
+    if (a === 'Unknown') return -1;
+    if (b === 'Unknown') return 1;
+    return a.localeCompare(b);
+  });
+  charts.timeline = new Chart(document.getElementById('chart-timeline'), {
+    type: 'bar',
+    data: {
+      labels: qLabels,
+      datasets: SEVERITY_ORDER.map(sev => ({
+        label: sev,
+        data: qLabels.map(q => quarters[q][sev] || 0),
+        backgroundColor: SEVERITY_COLORS[sev],
+        borderRadius: 2,
+      }))
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 10 } } },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
+        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } }
+      },
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const qLabel = qLabels[elements[0].index];
+        const range = quarterDateRanges[qLabel];
+        if (range) {
+          const searchEl = document.getElementById('filter-search');
+          // Toggle: if already filtering this quarter, clear it
+          if (searchEl.dataset.quarterFilter === qLabel) {
+            searchEl.dataset.quarterFilter = '';
+            activeQuarterFilter = null;
+            applyFilters();
+            scrollToTable();
+          } else {
+            searchEl.dataset.quarterFilter = qLabel;
+            activeQuarterFilter = range;
+            applyFilters();
+            scrollToTable();
+          }
+        }
+      }
+    }
+  });
+}
+
+/* ---- Chart click -> filter integration ---- */
+let activeQuarterFilter = null;
+
+function chartFilter(filterId, value) {
+  const el = document.getElementById(filterId);
+  // Toggle: if already set to this value, clear it
+  if (el.value === value) {
+    el.value = '';
+  } else {
+    el.value = value;
+  }
+  // Clear any active quarter filter when using dropdown filters
+  activeQuarterFilter = null;
+  const searchEl = document.getElementById('filter-search');
+  if (searchEl.dataset.quarterFilter) searchEl.dataset.quarterFilter = '';
+  applyFilters();
+  scrollToTable();
+}
+
+function scrollToTable() {
+  document.getElementById('filters').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ---- Filters ---- */
+function getUnique(field) {
+  const vals = new Set(allData.map(d => d[field]));
+  return [...vals].sort();
+}
+
+function buildFilters() {
+  const container = document.getElementById('filters');
+  const makeSelect = (id, label, options) => {
+    let html = `<select id="filter-${id}"><option value="">${label}</option>`;
+    options.forEach(o => { html += `<option value="${o}">${o}</option>`; });
+    html += '</select>';
+    return html;
+  };
+  container.innerHTML =
+    makeSelect('severity', 'All Severities', SEVERITY_ORDER) +
+    makeSelect('origin', 'All Origins', getUnique('origin')) +
+    makeSelect('detection', 'All Detection', getUnique('detection')) +
+    makeSelect('catchable', 'All Catchable By', getUnique('catchable_by')) +
+    '<input id="filter-search" type="text" placeholder="Search channel, what broke, root cause...">';
+
+  container.querySelectorAll('select, input').forEach(el => {
+    el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', applyFilters);
+  });
+}
+
+function applyFilters() {
+  const sev = document.getElementById('filter-severity').value;
+  const origin = document.getElementById('filter-origin').value;
+  const detection = document.getElementById('filter-detection').value;
+  const catchable = document.getElementById('filter-catchable').value;
+  const search = document.getElementById('filter-search').value.toLowerCase();
+
+  filteredData = allData.filter(d => {
+    if (sev && d.severity !== sev) return false;
+    if (origin && d.origin !== origin) return false;
+    if (detection && d.detection !== detection) return false;
+    if (catchable && d.catchable_by !== catchable) return false;
+    if (search) {
+      const haystack = `${d.channel} ${d.what_broke} ${d.root_cause}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    if (activeQuarterFilter && d.date && d.date !== 'UNKNOWN') {
+      if (d.date < activeQuarterFilter.start || d.date > activeQuarterFilter.end) return false;
+    }
+    return true;
+  });
+
+  const qLabel = document.getElementById('filter-search').dataset.quarterFilter || '';
+  const qText = qLabel ? ` | Quarter: ${qLabel}` : '';
+  document.getElementById('filter-count-display').textContent = `Showing ${filteredData.length} of ${allData.length} incidents${qText}`;
+
+  renderStats(filteredData);
+  renderCharts(allData);
+  sortAndRender();
+}
+
+/* ---- Table ---- */
+const COLUMNS = [
+  { key: 'date', label: 'Date', tip: 'When the incident occurred' },
+  { key: 'channel', label: 'Channel', tip: 'Slack incident channel name' },
+  { key: 'severity', label: 'Severity', tip: 'P0 = widespread critical, P1 = significant, P2 = limited, P3 = minor' },
+  { key: 'origin', label: 'Origin', tip: 'What caused it: our code (self-inflicted), vendor (external-dep), infra, or config change' },
+  { key: 'detection', label: 'Detection', tip: 'How we found out: monitoring, customer report, or internal discovery' },
+  { key: 'catchable_by', label: 'Catchable By', tip: 'What quality gate could have prevented this from reaching production' },
+];
+
+function buildTableHead() {
+  const tr = document.createElement('tr');
+  COLUMNS.forEach(col => {
+    const th = document.createElement('th');
+    th.setAttribute('data-tip', col.tip);
+    th.innerHTML = `${col.label}<span class="sort-arrow"></span>`;
+    th.addEventListener('click', () => {
+      if (sortCol === col.key) { sortDir *= -1; } else { sortCol = col.key; sortDir = 1; }
+      sortAndRender();
+    });
+    tr.appendChild(th);
+  });
+  document.getElementById('table-head').appendChild(tr);
+}
+
+function sortAndRender() {
+  filteredData.sort((a, b) => {
+    let av = a[sortCol] || '';
+    let bv = b[sortCol] || '';
+    if (sortCol === 'severity') {
+      av = SEVERITY_ORDER.indexOf(av);
+      bv = SEVERITY_ORDER.indexOf(bv);
+    } else if (sortCol === 'date') {
+      av = av === 'UNKNOWN' ? '0000' : av;
+      bv = bv === 'UNKNOWN' ? '0000' : bv;
+    }
+    if (av < bv) return -1 * sortDir;
+    if (av > bv) return 1 * sortDir;
+    return 0;
+  });
+
+  // Update sort arrows
+  document.querySelectorAll('#table-head th').forEach((th, i) => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (COLUMNS[i].key === sortCol) {
+      arrow.textContent = sortDir === 1 ? ' \u25B2' : ' \u25BC';
+    } else {
+      arrow.textContent = '';
+    }
+  });
+
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '';
+
+  filteredData.forEach((d, idx) => {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = idx;
+
+    const dateCell = d.date === 'UNKNOWN' ? '<span style="color:var(--text-muted)">Unknown</span>' : d.date;
+    const channelName = d.channel.replace(/^incident-/, '');
+    const sevTip = glossaryTip(d.severity, 'severity');
+    const sevBadge = `<span class="badge badge-${d.severity}" data-tip="${sevTip}">${d.severity}</span>`;
+    const originClass = `origin-${d.origin}`;
+    const originTip = glossaryTip(d.origin, 'origin');
+    const detTip = glossaryTip(d.detection, 'detection');
+    const catchTip = glossaryTip(d.catchable_by, 'catchable_by');
+
+    tr.innerHTML = `
+      <td>${dateCell}</td>
+      <td title="${d.channel}">${channelName}</td>
+      <td>${sevBadge}</td>
+      <td><span class="origin-badge ${originClass}" data-tip="${originTip}">${d.origin}</span></td>
+      <td><span data-tip="${detTip}">${d.detection}</span></td>
+      <td><span data-tip="${catchTip}">${d.catchable_by}</span></td>
+    `;
+
+    tr.addEventListener('click', () => toggleDetail(tr, d));
+    tbody.appendChild(tr);
+  });
+}
+
+function toggleDetail(tr, d) {
+  const existing = tr.nextElementSibling;
+  if (existing && existing.classList.contains('detail-row')) {
+    existing.remove();
+    tr.classList.remove('expanded');
+    return;
+  }
+
+  // Close any other open detail
+  document.querySelectorAll('.detail-row').forEach(el => {
+    el.previousElementSibling?.classList.remove('expanded');
+    el.remove();
+  });
+
+  tr.classList.add('expanded');
+  const detailTr = document.createElement('tr');
+  detailTr.classList.add('detail-row');
+
+  const fields = [
+    { label: 'What Broke', value: d.what_broke },
+    { label: 'Root Cause', value: d.root_cause },
+    { label: 'Severity Detail', value: d.severity_detail },
+    { label: 'Still Relevant', value: d.still_relevant },
+    { label: 'Linear Match', value: d.linear_match },
+    { label: 'Postmortem', value: d.postmortem },
+  ];
+
+  const content = fields
+    .filter(f => f.value)
+    .map(f => {
+      let val = f.value;
+      if (f.label === 'Postmortem' && val.startsWith('http')) {
+        val = `<a href="${val}" target="_blank">${val}</a>`;
+      }
+      if (f.label === 'Linear Match' && val.startsWith('http')) {
+        val = `<a href="${val}" target="_blank">${val}</a>`;
+      }
+      return `<div class="detail-field"><span class="detail-label">${f.label}</span>${val}</div>`;
+    }).join('');
+
+  detailTr.innerHTML = `<td colspan="${COLUMNS.length}"><div class="detail-content">${content}</div></td>`;
+  tr.after(detailTr);
+}
+
+init();
+</script>
+
+<!-- Chat FAB -->
+<button class="chat-fab" id="chat-fab" title="Ask about incidents">&#x1F4AC;</button>
+
+<!-- Chat Panel -->
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-header">
+    <h3>Ask about incidents</h3>
+    <div class="chat-header-actions">
+      <button id="chat-key-btn" title="API Key Settings">&#x2699;</button>
+      <button id="chat-clear-btn" title="Clear chat">&#x1F5D1;</button>
+    </div>
+  </div>
+  <div class="chat-messages" id="chat-messages">
+    <div class="chat-msg system">Ask questions about the 132 incidents. Requires an OpenAI API key (stored in your browser only).</div>
+  </div>
+  <div class="chat-input-row">
+    <input type="text" id="chat-input" placeholder="e.g. What are the top root causes for P0 incidents?" />
+    <button id="chat-send">Send</button>
+  </div>
+</div>
+
+<!-- API Key Modal -->
+<div class="key-modal-overlay" id="key-modal">
+  <div class="key-modal">
+    <h3>OpenAI API Key</h3>
+    <p>Your key is stored in this browser's localStorage only. It is sent directly to OpenAI's API and never touches any other server or this repository.</p>
+    <div class="key-status" id="key-status">No key configured</div>
+    <input type="password" id="key-input" placeholder="sk-..." autocomplete="off" />
+    <div class="key-modal-actions">
+      <button class="btn-danger" id="key-remove">Remove Key</button>
+      <button class="btn-cancel" id="key-cancel">Cancel</button>
+      <button class="btn-primary" id="key-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---- Chat Bot ---- */
+const STORAGE_KEY = 'incident-explorer-openai-key';
+const chatPanel = document.getElementById('chat-panel');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+const keyModal = document.getElementById('key-modal');
+
+// FAB toggle
+document.getElementById('chat-fab').addEventListener('click', () => {
+  chatPanel.classList.toggle('open');
+  if (chatPanel.classList.contains('open')) chatInput.focus();
+});
+
+// Key modal
+document.getElementById('chat-key-btn').addEventListener('click', () => {
+  updateKeyStatus();
+  document.getElementById('key-input').value = '';
+  keyModal.classList.add('open');
+});
+document.getElementById('key-cancel').addEventListener('click', () => keyModal.classList.remove('open'));
+document.getElementById('key-save').addEventListener('click', () => {
+  const key = document.getElementById('key-input').value.trim();
+  if (key) {
+    localStorage.setItem(STORAGE_KEY, key);
+    addChatMsg('system', 'API key saved to browser localStorage.');
+  }
+  keyModal.classList.remove('open');
+});
+document.getElementById('key-remove').addEventListener('click', () => {
+  localStorage.removeItem(STORAGE_KEY);
+  addChatMsg('system', 'API key removed.');
+  keyModal.classList.remove('open');
+});
+
+// Close modal on overlay click
+keyModal.addEventListener('click', (e) => {
+  if (e.target === keyModal) keyModal.classList.remove('open');
+});
+
+function updateKeyStatus() {
+  const el = document.getElementById('key-status');
+  const key = localStorage.getItem(STORAGE_KEY);
+  if (key) {
+    const masked = key.slice(0, 7) + '...' + key.slice(-4);
+    el.textContent = 'Key configured: ' + masked;
+    el.classList.add('has-key');
+  } else {
+    el.textContent = 'No key configured';
+    el.classList.remove('has-key');
+  }
+}
+
+// Clear chat
+document.getElementById('chat-clear-btn').addEventListener('click', () => {
+  chatMessages.innerHTML = '<div class="chat-msg system">Chat cleared. Ask a new question.</div>';
+  chatHistory = [];
+});
+
+// Chat logic
+let chatHistory = [];
+let isStreaming = false;
+
+function addChatMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  div.textContent = text;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+
+function buildSystemPrompt() {
+  const summary = {
+    total: allData.length,
+    date_range: 'Dec 2021 - Mar 2026',
+    incidents: allData.map(d => ({
+      date: d.date,
+      channel: d.channel,
+      what_broke: d.what_broke,
+      root_cause: d.root_cause,
+      severity: d.severity,
+      origin: d.origin,
+      detection: d.detection,
+      catchable_by: d.catchable_by,
+      still_relevant: d.still_relevant,
+    }))
+  };
+  return `You are an incident analysis assistant for the Momentum engineering team. You have access to ${allData.length} production incidents from Dec 2021 to Mar 2026.
+
+Answer questions about patterns, root causes, severity trends, detection gaps, and recommendations based on the data below. Be concise and data-driven. When citing incidents, reference the channel name and date.
+
+TERMINOLOGY (important — "monitoring" has two distinct meanings):
+- detection=monitoring: We found the incident via automated alerts/dashboards BEFORE customers reported it.
+- catchable_by=monitoring: No pre-deploy test could have caught this. Only runtime monitoring/alerting could detect it (load spikes, capacity limits, vendor outages).
+- origin=self-inflicted: Our own code/config. origin=external-dep: Third-party vendor failure. origin=infrastructure: Platform (GCP/AWS/K8s). origin=config-change: Intentional config change with unintended consequences.
+- catchable_by=none(external): Not preventable by us at all — external vendor failure.
+
+INCIDENT DATA (JSON):
+${JSON.stringify(summary.incidents)}`;
+}
+
+async function sendMessage() {
+  const key = localStorage.getItem(STORAGE_KEY);
+  if (!key) {
+    addChatMsg('system', 'No API key configured. Click the gear icon to add your OpenAI key.');
+    return;
+  }
+
+  const text = chatInput.value.trim();
+  if (!text || isStreaming) return;
+
+  addChatMsg('user', text);
+  chatInput.value = '';
+  isStreaming = true;
+  chatSend.disabled = true;
+
+  chatHistory.push({ role: 'user', content: text });
+
+  const assistantDiv = addChatMsg('assistant', '');
+  assistantDiv.textContent = 'Thinking...';
+
+  try {
+    const messages = [
+      { role: 'system', content: buildSystemPrompt() },
+      ...chatHistory.slice(-10) // Keep last 10 messages for context
+    ];
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + key,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: messages,
+        stream: true,
+        max_tokens: 1024,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      const msg = err.error?.message || `HTTP ${resp.status}`;
+      throw new Error(msg);
+    }
+
+    // Stream response
+    assistantDiv.textContent = '';
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            fullText += delta;
+            assistantDiv.textContent = fullText;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+        } catch (e) { /* skip parse errors in stream */ }
+      }
+    }
+
+    chatHistory.push({ role: 'assistant', content: fullText });
+
+  } catch (e) {
+    assistantDiv.textContent = 'Error: ' + e.message;
+    assistantDiv.style.color = 'var(--p0)';
+  } finally {
+    isStreaming = false;
+    chatSend.disabled = false;
+    chatInput.focus();
+  }
+}
+
+chatSend.addEventListener('click', sendMessage);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+</script>
+</body>
+</html>
