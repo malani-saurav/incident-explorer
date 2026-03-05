@@ -133,49 +133,48 @@
     border-color: var(--accent);
   }
   .filters-bar input[type="text"] { flex: 1; min-width: 200px; }
-  /* Time range slider */
+  /* Time range slider — compact */
   .time-slider {
-    background: var(--surface);
-    border-radius: 12px;
-    padding: 16px 24px 12px;
-    margin-bottom: 24px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  }
-  .slider-labels {
     display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 12px;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
   }
+  .slider-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 56px;
+  }
+  .slider-label-right { text-align: right; }
   .slider-track-wrap {
     position: relative;
-    height: 36px;
+    height: 20px;
+    flex: 1;
   }
   .slider-track {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
     width: 100%;
-    height: 6px;
+    height: 3px;
     background: #333355;
-    border-radius: 3px;
+    border-radius: 2px;
   }
   .slider-range {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    height: 6px;
+    height: 3px;
     background: var(--accent);
-    border-radius: 3px;
+    border-radius: 2px;
     pointer-events: none;
   }
   .slider-thumb {
     position: absolute;
     top: 0;
     width: 100%;
-    height: 36px;
+    height: 20px;
     -webkit-appearance: none;
     appearance: none;
     background: none;
@@ -184,40 +183,26 @@
   }
   .slider-thumb::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 20px;
-    height: 20px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--accent);
-    border: 2px solid var(--surface);
+    border: 1.5px solid var(--bg);
     cursor: pointer;
     pointer-events: auto;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
     transition: transform 0.1s;
   }
   .slider-thumb::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
+    transform: scale(1.3);
   }
   .slider-thumb::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--accent);
-    border: 2px solid var(--surface);
+    border: 1.5px solid var(--bg);
     cursor: pointer;
     pointer-events: auto;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  }
-  .slider-ticks {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 4px;
-    overflow: hidden;
-  }
-  .slider-ticks span {
-    font-size: 10px;
-    color: var(--text-muted);
-    text-align: center;
-    min-width: 0;
   }
   .filter-count { color: var(--text-muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
 
@@ -552,17 +537,14 @@
 </div>
 
 <div id="time-slider" class="time-slider">
-  <div class="slider-labels">
-    <span id="slider-label-left"></span>
-    <span id="slider-label-right"></span>
-  </div>
+  <span class="slider-label" id="slider-label-left"></span>
   <div class="slider-track-wrap" id="slider-track-wrap">
     <div class="slider-track"></div>
     <div class="slider-range" id="slider-range"></div>
     <input type="range" class="slider-thumb" id="slider-min" min="0" max="1" value="0" step="1">
     <input type="range" class="slider-thumb" id="slider-max" min="0" max="1" value="1" step="1">
   </div>
-  <div class="slider-ticks" id="slider-ticks"></div>
+  <span class="slider-label slider-label-right" id="slider-label-right"></span>
 </div>
 
 <div id="stats-row" class="stats-row"></div>
@@ -658,21 +640,6 @@ function buildTimeSlider() {
 
   sliderMin.min = 0; sliderMin.max = maxIdx; sliderMin.value = 0;
   sliderMax.min = 0; sliderMax.max = maxIdx; sliderMax.value = maxIdx;
-
-  // Tick marks — show only year labels to avoid clutter
-  const ticksEl = document.getElementById('slider-ticks');
-  const tickHTML = [];
-  let lastYear = '';
-  sliderMonths.forEach((ym, i) => {
-    const yr = ym.slice(0, 4);
-    if (yr !== lastYear) {
-      tickHTML.push(`<span style="position:absolute;left:${(i / maxIdx) * 100}%">${yr}</span>`);
-      lastYear = yr;
-    }
-  });
-  ticksEl.style.position = 'relative';
-  ticksEl.style.height = '16px';
-  ticksEl.innerHTML = tickHTML.join('');
 
   function updateSlider() {
     let lo = parseInt(sliderMin.value);
