@@ -133,11 +133,92 @@
     border-color: var(--accent);
   }
   .filters-bar input[type="text"] { flex: 1; min-width: 200px; }
-  .date-range { display: flex; align-items: center; gap: 6px; }
-  .date-range label { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-  .date-range input[type="date"] { min-width: 130px; flex: none; }
-  .date-range .date-clear { background: none; border: 1px solid #333355; color: var(--text-muted); border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-  .date-range .date-clear:hover { border-color: var(--accent); color: var(--text); }
+  /* Time range slider */
+  .time-slider {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 16px 24px 12px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .slider-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+  }
+  .slider-track-wrap {
+    position: relative;
+    height: 36px;
+  }
+  .slider-track {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 100%;
+    height: 6px;
+    background: #333355;
+    border-radius: 3px;
+  }
+  .slider-range {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 6px;
+    background: var(--accent);
+    border-radius: 3px;
+    pointer-events: none;
+  }
+  .slider-thumb {
+    position: absolute;
+    top: 0;
+    width: 100%;
+    height: 36px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: none;
+    pointer-events: none;
+    margin: 0;
+  }
+  .slider-thumb::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    transition: transform 0.1s;
+  }
+  .slider-thumb::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+  }
+  .slider-thumb::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .slider-ticks {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .slider-ticks span {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    min-width: 0;
+  }
   .filter-count { color: var(--text-muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
 
   /* Table */
@@ -467,7 +548,21 @@
 
 <div class="header">
   <h1>Incident Explorer</h1>
-  <div class="subtitle">132 incidents | Dec 2021 &ndash; Mar 2026</div>
+  <div class="subtitle" id="subtitle">132 incidents | Dec 2021 &ndash; Mar 2026</div>
+</div>
+
+<div id="time-slider" class="time-slider">
+  <div class="slider-labels">
+    <span id="slider-label-left"></span>
+    <span id="slider-label-right"></span>
+  </div>
+  <div class="slider-track-wrap" id="slider-track-wrap">
+    <div class="slider-track"></div>
+    <div class="slider-range" id="slider-range"></div>
+    <input type="range" class="slider-thumb" id="slider-min" min="0" max="1" value="0" step="1">
+    <input type="range" class="slider-thumb" id="slider-max" min="0" max="1" value="1" step="1">
+  </div>
+  <div class="slider-ticks" id="slider-ticks"></div>
 </div>
 
 <div id="stats-row" class="stats-row"></div>
@@ -536,6 +631,85 @@ let filteredData = [];
 let sortCol = 'date';
 let sortDir = -1; // -1 = desc
 let charts = {};
+let sliderMonths = [];
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function formatMonth(ym) {
+  const [y, m] = ym.split('-');
+  return MONTH_NAMES[parseInt(m) - 1] + ' ' + y;
+}
+
+function buildTimeSlider() {
+  // Build sorted unique months from data
+  const monthSet = new Set();
+  allData.forEach(d => {
+    if (d.date && d.date !== 'UNKNOWN') monthSet.add(d.date.slice(0, 7));
+  });
+  sliderMonths = [...monthSet].sort();
+  if (sliderMonths.length < 2) {
+    document.getElementById('time-slider').style.display = 'none';
+    return;
+  }
+
+  const sliderMin = document.getElementById('slider-min');
+  const sliderMax = document.getElementById('slider-max');
+  const maxIdx = sliderMonths.length - 1;
+
+  sliderMin.min = 0; sliderMin.max = maxIdx; sliderMin.value = 0;
+  sliderMax.min = 0; sliderMax.max = maxIdx; sliderMax.value = maxIdx;
+
+  // Tick marks — show only year labels to avoid clutter
+  const ticksEl = document.getElementById('slider-ticks');
+  const tickHTML = [];
+  let lastYear = '';
+  sliderMonths.forEach((ym, i) => {
+    const yr = ym.slice(0, 4);
+    if (yr !== lastYear) {
+      tickHTML.push(`<span style="position:absolute;left:${(i / maxIdx) * 100}%">${yr}</span>`);
+      lastYear = yr;
+    }
+  });
+  ticksEl.style.position = 'relative';
+  ticksEl.style.height = '16px';
+  ticksEl.innerHTML = tickHTML.join('');
+
+  function updateSlider() {
+    let lo = parseInt(sliderMin.value);
+    let hi = parseInt(sliderMax.value);
+    // Prevent crossing
+    if (lo > hi) { sliderMin.value = hi; lo = hi; }
+    if (hi < lo) { sliderMax.value = lo; hi = lo; }
+
+    // Update range highlight
+    const pctL = (lo / maxIdx) * 100;
+    const pctR = (hi / maxIdx) * 100;
+    document.getElementById('slider-range').style.left = pctL + '%';
+    document.getElementById('slider-range').style.width = (pctR - pctL) + '%';
+
+    // Update labels
+    document.getElementById('slider-label-left').textContent = formatMonth(sliderMonths[lo]);
+    document.getElementById('slider-label-right').textContent = formatMonth(sliderMonths[hi]);
+
+    // Update subtitle
+    updateSubtitle();
+
+    applyFilters();
+  }
+
+  sliderMin.addEventListener('input', updateSlider);
+  sliderMax.addEventListener('input', updateSlider);
+  updateSlider();
+}
+
+function updateSubtitle() {
+  const lo = parseInt(document.getElementById('slider-min').value);
+  const hi = parseInt(document.getElementById('slider-max').value);
+  const from = formatMonth(sliderMonths[lo]);
+  const to = formatMonth(sliderMonths[hi]);
+  const count = filteredData.length;
+  document.getElementById('subtitle').textContent = `${count} incidents | ${from} \u2013 ${to}`;
+}
 
 async function init() {
   try {
@@ -550,7 +724,7 @@ async function init() {
 
   buildFilters();
   buildTableHead();
-  applyFilters();
+  buildTimeSlider();
 }
 
 /* ---- Stats ---- */
@@ -779,17 +953,7 @@ function buildFilters() {
     html += '</select>';
     return html;
   };
-  // Compute date bounds for placeholders
-  const dates = allData.map(d => d.date).filter(d => d && d !== 'UNKNOWN').sort();
-  const minDate = dates[0] || '';
-  const maxDate = dates[dates.length - 1] || '';
-
   container.innerHTML =
-    '<div class="date-range">' +
-      '<label>From</label><input id="filter-date-from" type="date" min="' + minDate + '" max="' + maxDate + '">' +
-      '<label>To</label><input id="filter-date-to" type="date" min="' + minDate + '" max="' + maxDate + '">' +
-      '<button class="date-clear" id="date-clear-btn" title="Clear date range">Clear</button>' +
-    '</div>' +
     makeSelect('severity', 'All Severities', SEVERITY_ORDER) +
     makeSelect('origin', 'All Origins', getUnique('origin')) +
     makeSelect('detection', 'All Detection', getUnique('detection')) +
@@ -799,13 +963,6 @@ function buildFilters() {
   container.querySelectorAll('select, input').forEach(el => {
     el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', applyFilters);
   });
-  document.getElementById('filter-date-from').addEventListener('change', applyFilters);
-  document.getElementById('filter-date-to').addEventListener('change', applyFilters);
-  document.getElementById('date-clear-btn').addEventListener('click', () => {
-    document.getElementById('filter-date-from').value = '';
-    document.getElementById('filter-date-to').value = '';
-    applyFilters();
-  });
 }
 
 function applyFilters() {
@@ -814,8 +971,6 @@ function applyFilters() {
   const detection = document.getElementById('filter-detection').value;
   const catchable = document.getElementById('filter-catchable').value;
   const search = document.getElementById('filter-search').value.toLowerCase();
-  const dateFrom = document.getElementById('filter-date-from').value;
-  const dateTo = document.getElementById('filter-date-to').value;
 
   filteredData = allData.filter(d => {
     if (sev && d.severity !== sev) return false;
@@ -826,10 +981,13 @@ function applyFilters() {
       const haystack = `${d.channel} ${d.what_broke} ${d.root_cause}`.toLowerCase();
       if (!haystack.includes(search)) return false;
     }
-    if (dateFrom || dateTo) {
+    // Time slider filter
+    if (sliderMonths.length > 0) {
       if (!d.date || d.date === 'UNKNOWN') return false;
-      if (dateFrom && d.date < dateFrom) return false;
-      if (dateTo && d.date > dateTo) return false;
+      const from = sliderMonths[parseInt(document.getElementById('slider-min').value)];
+      const to = sliderMonths[parseInt(document.getElementById('slider-max').value)];
+      const dMonth = d.date.slice(0, 7); // "YYYY-MM"
+      if (dMonth < from || dMonth > to) return false;
     }
     if (activeQuarterFilter && d.date && d.date !== 'UNKNOWN') {
       if (d.date < activeQuarterFilter.start || d.date > activeQuarterFilter.end) return false;
@@ -841,6 +999,7 @@ function applyFilters() {
   const qText = qLabel ? ` | Quarter: ${qLabel}` : '';
   document.getElementById('filter-count-display').textContent = `Showing ${filteredData.length} of ${allData.length} incidents${qText}`;
 
+  if (sliderMonths.length > 0) updateSubtitle();
   renderStats(filteredData);
   renderCharts(allData);
   sortAndRender();
