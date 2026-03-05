@@ -133,75 +133,81 @@
     border-color: var(--accent);
   }
   .filters-bar input[type="text"] { flex: 1; min-width: 200px; }
-  /* Time range slider — compact */
-  .time-slider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .slider-label {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    min-width: 56px;
-  }
-  .slider-label-right { text-align: right; }
-  .slider-track-wrap {
+  /* Time ruler — Google Docs style */
+  .time-ruler {
     position: relative;
-    height: 20px;
-    flex: 1;
+    margin: 8px 0 16px;
+    height: 26px;
+    user-select: none;
   }
-  .slider-track {
+  .ruler-baseline {
     position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 100%;
-    height: 3px;
-    background: #333355;
-    border-radius: 2px;
+    top: 14px;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #444466;
   }
-  .slider-range {
+  .ruler-ticks .tick {
     position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
+    top: 14px;
+    width: 1px;
+    background: #444466;
+    transform: translateY(-100%);
+  }
+  .ruler-ticks .tick.year { height: 10px; }
+  .ruler-ticks .tick.half { height: 7px; }
+  .ruler-ticks .tick.month { height: 4px; }
+  .ruler-ticks .tick-label {
+    position: absolute;
+    top: 16px;
+    font-size: 9px;
+    color: #666688;
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+  .ruler-range {
+    position: absolute;
+    top: 13px;
     height: 3px;
     background: var(--accent);
-    border-radius: 2px;
+    border-radius: 1.5px;
     pointer-events: none;
+    opacity: 0.6;
   }
-  .slider-thumb {
+  .ruler-thumb {
     position: absolute;
     top: 0;
+    left: 0;
     width: 100%;
-    height: 20px;
+    height: 26px;
     -webkit-appearance: none;
     appearance: none;
     background: none;
     pointer-events: none;
     margin: 0;
   }
-  .slider-thumb::-webkit-slider-thumb {
+  .ruler-thumb::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 12px;
+    width: 8px;
     height: 12px;
-    border-radius: 50%;
     background: var(--accent);
-    border: 1.5px solid var(--bg);
-    cursor: pointer;
+    border: none;
+    border-radius: 1px 1px 3px 3px;
+    cursor: col-resize;
     pointer-events: auto;
-    transition: transform 0.1s;
+    margin-top: 2px;
   }
-  .slider-thumb::-webkit-slider-thumb:hover {
-    transform: scale(1.3);
+  .ruler-thumb::-webkit-slider-thumb:hover {
+    background: #8a83ff;
   }
-  .slider-thumb::-moz-range-thumb {
-    width: 12px;
+  .ruler-thumb::-moz-range-thumb {
+    width: 8px;
     height: 12px;
-    border-radius: 50%;
     background: var(--accent);
-    border: 1.5px solid var(--bg);
-    cursor: pointer;
+    border: none;
+    border-radius: 1px 1px 3px 3px;
+    cursor: col-resize;
     pointer-events: auto;
   }
   .filter-count { color: var(--text-muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
@@ -536,15 +542,12 @@
   <div class="subtitle" id="subtitle">132 incidents | Dec 2021 &ndash; Mar 2026</div>
 </div>
 
-<div id="time-slider" class="time-slider">
-  <span class="slider-label" id="slider-label-left"></span>
-  <div class="slider-track-wrap" id="slider-track-wrap">
-    <div class="slider-track"></div>
-    <div class="slider-range" id="slider-range"></div>
-    <input type="range" class="slider-thumb" id="slider-min" min="0" max="1" value="0" step="1">
-    <input type="range" class="slider-thumb" id="slider-max" min="0" max="1" value="1" step="1">
-  </div>
-  <span class="slider-label slider-label-right" id="slider-label-right"></span>
+<div id="time-ruler" class="time-ruler">
+  <div class="ruler-baseline"></div>
+  <div class="ruler-ticks" id="ruler-ticks"></div>
+  <div class="ruler-range" id="slider-range"></div>
+  <input type="range" class="ruler-thumb" id="slider-min" min="0" max="1" value="0" step="1">
+  <input type="range" class="ruler-thumb" id="slider-max" min="0" max="1" value="1" step="1">
 </div>
 
 <div id="stats-row" class="stats-row"></div>
@@ -630,7 +633,7 @@ function buildTimeSlider() {
   });
   sliderMonths = [...monthSet].sort();
   if (sliderMonths.length < 2) {
-    document.getElementById('time-slider').style.display = 'none';
+    document.getElementById('time-ruler').style.display = 'none';
     return;
   }
 
@@ -641,26 +644,38 @@ function buildTimeSlider() {
   sliderMin.min = 0; sliderMin.max = maxIdx; sliderMin.value = 0;
   sliderMax.min = 0; sliderMax.max = maxIdx; sliderMax.value = maxIdx;
 
+  // Render ruler ticks — year (tall + label), Jul (medium), month (short)
+  const ticksEl = document.getElementById('ruler-ticks');
+  let tickHTML = '';
+  let lastYear = '';
+  sliderMonths.forEach((ym, i) => {
+    const pct = (i / maxIdx) * 100;
+    const yr = ym.slice(0, 4);
+    const mo = parseInt(ym.slice(5, 7));
+    if (yr !== lastYear) {
+      tickHTML += `<div class="tick year" style="left:${pct}%"></div>`;
+      tickHTML += `<span class="tick-label" style="left:${pct}%">${yr}</span>`;
+      lastYear = yr;
+    } else if (mo === 7) {
+      tickHTML += `<div class="tick half" style="left:${pct}%"></div>`;
+    } else {
+      tickHTML += `<div class="tick month" style="left:${pct}%"></div>`;
+    }
+  });
+  ticksEl.innerHTML = tickHTML;
+
   function updateSlider() {
     let lo = parseInt(sliderMin.value);
     let hi = parseInt(sliderMax.value);
-    // Prevent crossing
     if (lo > hi) { sliderMin.value = hi; lo = hi; }
     if (hi < lo) { sliderMax.value = lo; hi = lo; }
 
-    // Update range highlight
     const pctL = (lo / maxIdx) * 100;
     const pctR = (hi / maxIdx) * 100;
     document.getElementById('slider-range').style.left = pctL + '%';
     document.getElementById('slider-range').style.width = (pctR - pctL) + '%';
 
-    // Update labels
-    document.getElementById('slider-label-left').textContent = formatMonth(sliderMonths[lo]);
-    document.getElementById('slider-label-right').textContent = formatMonth(sliderMonths[hi]);
-
-    // Update subtitle
     updateSubtitle();
-
     applyFilters();
   }
 
